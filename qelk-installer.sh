@@ -266,13 +266,12 @@ ERROR=$?
  
 echo "[QELK INFO] Creating logstash's .conf files.."
 
+##### Creating the Beats Input file #####
+
 BEATSINPUT="
 input {
   beats {
     port => 5044
-    ssl => true
-    ssl_certificate => \"/etc/pki/tls/certs/ELK-Stack.crt\"
-    ssl_key => \"/etc/pki/tls/private/ELK-Stack.key\"
   }
 }
 "
@@ -284,15 +283,62 @@ ERROR=$?
         echoerror "Could not create custom logstash file /etc/logstash/conf.d/02-beats-input.conf (Error Code: $ERROR)."
     fi
 
+##### Creating the Syslog Filter file #####
+	
+SYSLOGFILTER="
+filter {
+  if [fileset][module] == \"system\" {
+    if [fileset][name] == \"auth\" {
+      grok {
+        match => { \"message\" => [\"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} sshd(?:\[%{POSINT:[system][auth][pid]}\])?: %{DATA:[system][auth][ssh][event]} %{DATA:[system][auth][ssh][method]} for (invalid user )?%{DATA:[system][auth][user]} from %{IPORHOST:[system][auth][ssh][ip]} port %{NUMBER:[system][auth][ssh][port]} ssh2(: %{GREEDYDATA:[system][auth][ssh][signature]})?\",
+                  \"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} sshd(?:\[%{POSINT:[system][auth][pid]}\])?: %{DATA:[system][auth][ssh][event]} user %{DATA:[system][auth][user]} from %{IPORHOST:[system][auth][ssh][ip]}\",
+                  \"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} sshd(?:\[%{POSINT:[system][auth][pid]}\])?: Did not receive identification string from %{IPORHOST:[system][auth][ssh][dropped_ip]}\",
+                  \"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} sudo(?:\[%{POSINT:[system][auth][pid]}\])?: \s*%{DATA:[system][auth][user]} :( %{DATA:[system][auth][sudo][error]} ;)? TTY=%{DATA:[system][auth][sudo][tty]} ; PWD=%{DATA:[system][auth][sudo][pwd]} ; USER=%{DATA:[system][auth][sudo][user]} ; COMMAND=%{GREEDYDATA:[system][auth][sudo][command]}\",
+                  \"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} groupadd(?:\[%{POSINT:[system][auth][pid]}\])?: new group: name=%{DATA:system.auth.groupadd.name}, GID=%{NUMBER:system.auth.groupadd.gid}\",
+                  \"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} useradd(?:\[%{POSINT:[system][auth][pid]}\])?: new user: name=%{DATA:[system][auth][user][add][name]}, UID=%{NUMBER:[system][auth][user][add][uid]}, GID=%{NUMBER:[system][auth][user][add][gid]}, home=%{DATA:[system][auth][user][add][home]}, shell=%{DATA:[system][auth][user][add][shell]}$\",
+                  \"%{SYSLOGTIMESTAMP:[system][auth][timestamp]} %{SYSLOGHOST:[system][auth][hostname]} %{DATA:[system][auth][program]}(?:\[%{POSINT:[system][auth][pid]}\])?: %{GREEDYMULTILINE:[system][auth][message]}\"] }
+        pattern_definitions => {
+          \"GREEDYMULTILINE\"=> \"(.|\n)*\"
+        }
+        remove_field => \"message\"
+      }
+      date {
+        match => [ \"[system][auth][timestamp]\", \"MMM  d HH:mm:ss\", \"MMM dd HH:mm:ss\" ]
+      }
+      geoip {
+        source => \"[system][auth][ssh][ip]\"
+        target => \"[system][auth][ssh][geoip]\"
+      }
+    }
+    else if [fileset][name] == \"syslog\" {
+      grok {
+        match => { \"message\" => [\"%{SYSLOGTIMESTAMP:[system][syslog][timestamp]} %{SYSLOGHOST:[system][syslog][hostname]} %{DATA:[system][syslog][program]}(?:\[%{POSINT:[system][syslog][pid]}\])?: %{GREEDYMULTILINE:[system][syslog][message]}\"] }
+        pattern_definitions => { \"GREEDYMULTILINE\" => \"(.|\n)*\" }
+        remove_field => \"message\"
+      }
+      date {
+        match => [ \"[system][syslog][timestamp]\", \"MMM  d HH:mm:ss\", \"MMM dd HH:mm:ss\" ]
+      }
+    }
+  }
+}
+"
+touch /etc/logstash/conf.d/10-syslog-filter.conf
+echo "$SYSLOGFILTER" >> /etc/logstash/conf.d/10-syslog-filter.conf
+
+ERROR=$?
+    if [ $ERROR -ne 0 ]; then
+        echoerror "Could not create custom logstash filter file /etc/logstash/conf.d/10-syslog-filter.conf (Error Code: $ERROR)."
+    fi	
+	
+##### Creating the Elasticsearch Output file #####
 
 ELASTICSEARCHOUTPUT="
 output {
   elasticsearch {
     hosts => [\"localhost:9200\"]
-    sniffing => true
     manage_template => false
-    index => \"%{[@metadata][beat]}-%{+YYYY.MM.dd}\"
-    document_type => \"%{[@metadata][type]}\"
+    index => \"%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}\"
   }
 }
 "
@@ -303,21 +349,23 @@ ERROR=$?
     if [ $ERROR -ne 0 ]; then
         echoerror "Could not create custom logstash file /etc/logstash/conf.d/30-elasticsearch-output.conf (Error Code: $ERROR)."
     fi
-    
+   
+echo "[QELK INFO] Testing Logstash configuration file. This should display 
+Configuration OK after a couple moments.."
+sudo -u logstash /usr/share/logstash/bin/logstash --path.settings /etc/logstash -t
+   
 echo "[QELK INFO] Starting logstash and setting Logstash to start automatically when the system boots.."
 systemctl start logstash >> $LOGFILE 2>&1
-systemctl restart logstash >> $LOGFILE 2>&1
 systemctl enable logstash >> $LOGFILE 2>&1
+systemctl restart logstash >> $LOGFILE 2>&1
 
 ERROR=$?
       if [ $ERROR -ne 0 ]; then
         echoerror "Could not start logstash and set it to start automatically when the system boots (Error Code: $ERROR)"
       fi
 echo "**********************************************************************************************************"
-echo "[QELK INFO] Your HELK has been installed"
+echo "[QELK INFO] Your QELK has been installed"
 echo "[QELK INFO] Browse to your Ubuntu Server and sign-in:"
 echo "Username: " $nginxUsername
 echo "Password: " $passvar1
-echo "Additional Details:"
-echo "SSL cert: /etc/pki/tls/certs/ELK-Stack.crt"
 echo "**********************************************************************************************************"
