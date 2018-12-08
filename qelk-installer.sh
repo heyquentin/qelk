@@ -6,6 +6,8 @@
 
 # Description: This script installs every single component of the ELK Stack plus Nginx
 
+#set -x #echo on
+
 LOGFILE="/var/log/qelk-install.log"
 
 echoerror() {
@@ -123,17 +125,16 @@ ERROR=$?
     fi
     
 echo "[QELK INFO] Starting elasticsearch and setting elasticsearch to start automatically when the system boots.."
-#systemctl daemon-reload >> $LOGFILE 2>&1
-systemctl start elasticsearch.service >> $LOGFILE 2>&1
+systemctl daemon-reload >> $LOGFILE 2>&1
 systemctl enable elasticsearch.service >> $LOGFILE 2>&1
+systemctl start elasticsearch.service >> $LOGFILE 2>&1
 ERROR=$?
     if [ $ERROR -ne 0 ]; then
         echoerror "Could not start elasticsearch and set elasticsearch to start automatically when the system boots (Error Code: $ERROR)."
     fi
 
-echo "[QELK INFO] Testing Elasticsearch..."
-echo "[QELK INFO] You should see a tagline at the end of this http request..."
-curl -X GET "localhost:9200"
+#echo "[QELK INFO] Disabling firewall..."
+#sudo service ufw stop
 
 echo "[QELK INFO] Installing updates.."
 apt-get update >> $LOGFILE 2>&1
@@ -141,6 +142,11 @@ ERROR=$?
     if [ $ERROR -ne 0 ]; then
         echoerror "Could not install updates (Error Code: $ERROR)."
     fi
+
+sleep 30
+echo "[QELK INFO] Testing Elasticsearch..."
+echo "[QELK INFO] You should see a tagline at the end of this http request..."
+sudo curl -X GET "127.0.0.1:9200"		
 
 # *********** Installing Kibana ***************
 echo "[QELK INFO] Installing Kibana.."
