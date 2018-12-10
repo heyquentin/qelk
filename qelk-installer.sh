@@ -100,6 +100,7 @@ ERROR=$?
 #mkdir /etc/pki/tls/private >> $LOGFILE 2>&1
 #openssl req -config /etc/ssl/openssl.cnf -x509 -days 3650 -batch -nodes -newkey rsa:2048 -keyout /etc/pki/tls/private/ELK-Stack.key -out /etc/pki/tls/certs/ELK-Stack.crt
 
+
 # *********** Installing Elasticsearch ***************
 echo "[QELK INFO] Installing Elasticsearch.."
 apt-get install elasticsearch >> $LOGFILE 2>&1
@@ -133,9 +134,6 @@ ERROR=$?
         echoerror "Could not start elasticsearch and set elasticsearch to start automatically when the system boots (Error Code: $ERROR)."
     fi
 
-#echo "[QELK INFO] Disabling firewall..."
-#sudo service ufw stop
-
 echo "[QELK INFO] Installing updates.."
 apt-get update >> $LOGFILE 2>&1
 ERROR=$?
@@ -147,6 +145,7 @@ sleep 30
 echo "[QELK INFO] Testing Elasticsearch..."
 echo "[QELK INFO] You should see a tagline at the end of this http request..."
 sudo curl -X GET "127.0.0.1:9200"		
+
 
 # *********** Installing Kibana ***************
 echo "[QELK INFO] Installing Kibana.."
@@ -178,6 +177,7 @@ ERROR=$?
     if [ $ERROR -ne 0 ]; then
         echoerror "Could not start kibana and set kibana to start automatically when the system boots (Error Code: $ERROR)."
     fi
+
 
 # *********** Installing Nginx ***************
 echo "[QELK INFO] Installing Nginx.."
@@ -231,10 +231,10 @@ server {
     location / {
         proxy_pass http://localhost:5601;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
     }
 }
 "
@@ -247,6 +247,16 @@ ERROR=$?
     
 echo "[QELK INFO] testing nginx configuration.."
 nginx -t >> $LOGFILE 2>&1
+
+
+echo "[QELK INFO] Starting nginx and setting nginx to start automatically when the system boots.."
+systemctl daemon-reload >> $LOGFILE 2>&1
+systemctl enable nginx.service >> $LOGFILE 2>&1
+systemctl start nginx.service >> $LOGFILE 2>&1
+ERROR=$?
+    if [ $ERROR -ne 0 ]; then
+        echoerror "Could not start nginx and set nginx to start automatically when the system boots (Error Code: $ERROR)."
+    fi
 
 echo "[QELK INFO] Restarting nginx service.."
 systemctl restart nginx >> $LOGFILE 2>&1
@@ -261,6 +271,7 @@ ERROR=$?
     if [ $ERROR -ne 0 ]; then
         echoerror "Could not install update (Error Code: $ERROR)."
     fi
+
 
 # *********** Installing Logstash ***************
 echo "[QELK INFO] Installing Logstash.."
